@@ -3,6 +3,7 @@ import CaptureButton from './components/CaptureButton.jsx'
 import ReceiptCard from './components/ReceiptCard.jsx'
 import { extractReceipt } from './lib/extractReceipt.js'
 import { signIn, isSignedIn, uploadReceiptPhoto, appendToSheet, getNextSequenceNumber, sanitizeForFilename } from './lib/googleApi.js'
+import { compressImage } from './lib/imageCompression.js'
 
 export default function App() {
   const [receipts, setReceipts] = useState([])
@@ -18,13 +19,15 @@ export default function App() {
     try {
       if (!isSignedIn()) await signIn()
 
-      const parsed = await extractReceipt(file)
-      const category = sanitizeForFilename(parsed.category) // filename only — unaffected by this change
+      const compressed = await compressImage(file)
+
+      const parsed = await extractReceipt(compressed)
+      const category = sanitizeForFilename(parsed.category) // filename only
       const sequence = await getNextSequenceNumber(parsed.date)
       const filename = `${parsed.date}_${category}_${sequence}.jpg`
       const itemsList = (parsed.items || []).map((item) => item.name).filter(Boolean).join(', ')
 
-      await uploadReceiptPhoto(file, filename)
+      await uploadReceiptPhoto(compressed, filename)
       await appendToSheet({ date: parsed.date, itemsList, total: parsed.total, coa: parsed.coa, coaName: parsed.coaName, filename })
 
       setReceipts((prev) =>
