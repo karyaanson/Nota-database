@@ -1,19 +1,38 @@
 // Client-side Google Drive + Sheets integration.
 // Uses Google Identity Services (GIS) for OAuth — no backend required for this part.
+// The access token is cached in localStorage so re-opening the app within the
+// same ~1 hour window doesn't prompt sign-in again, but a fresh sign-in is
+// needed after that, since Google access tokens expire after about an hour.
 //
 // Setup (see README for full walkthrough):
 // 1. Create a project in Google Cloud Console.
 // 2. Enable the Drive API and Sheets API.
 // 3. Create an OAuth 2.0 Client ID (type: Web application).
-// 4. Add your dev URL (e.g. http://localhost:5173, or your StackBlitz preview URL)
-//    and your deployed URL to "Authorized JavaScript origins".
+// 4. Add your dev URL and your deployed URL to "Authorized JavaScript origins".
 // 5. Put the client ID in your .env file as VITE_GOOGLE_CLIENT_ID.
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets'
+const STORAGE_KEY = 'receipt-scanner-google-token'
 
 let tokenClient = null
 let accessToken = null
+
+// On load, check if a still-valid token was saved from a previous session.
+try {
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
+  if (saved && saved.expiresAt > Date.now()) {
+    accessToken = saved.accessToken
+  }
+} catch {
+  // corrupted/missing storage — ignore, will just prompt sign-in as normal
+}
+
+function saveToken(token, expiresInSeconds) {
+  accessToken = token
+  const expiresAt = Date.now() + expiresInSeconds * 1000
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ accessToken: token, expiresAt }))
+}
 
 // Loads the Google Identity Services script once.
 function loadGisScript() {
@@ -28,6 +47,9 @@ function loadGisScript() {
 }
 
 export async function signIn() {
+  // Already have a valid token from a previous session — skip the prompt entirely.
+  if (isSignedIn()) return accessToken
+
   await loadGisScript()
 
   return new Promise((resolve, reject) => {
@@ -36,7 +58,7 @@ export async function signIn() {
       scope: SCOPES,
       callback: (response) => {
         if (response.error) return reject(response)
-        accessToken = response.access_token
+        saveToken(response.access_token, response.expires_in)
         resolve(accessToken)
       }
     })
@@ -47,6 +69,7 @@ export async function signIn() {
 export function isSignedIn() {
   return !!accessToken
 }
+
 
 // Looks at existing files in the Drive folder to find the next free 000–999
 // sequence number for a given date, so filenames like 2026-08-20_Groceries_001
